@@ -6,11 +6,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+SALT_SIZE = 16
+
 # Get database name from .env
 db_name = os.environ.get('DB_NAME')
 
 # Get hashing interations number
-hash_iters = int(os.environ.get("HASH_ITERS"))
+HASH_ITERS = int(os.environ.get("HASH_ITERS"))
 
 
 def init_database():
@@ -30,7 +32,7 @@ def init_database():
     con.close()
 
 
-def get_password():
+def get_password() -> bool:
     password = input("Enter password: ")
     repassword = input("Re-enter password: ")
 
@@ -43,20 +45,23 @@ def get_password():
     # If passwords are valid then add password to db
     add_password(password)
 
+    return True
 
-def verify_password(password: str, password_hash: bytes) -> bool:
-    return bcrypt.checkpw(password.encode(), password_hash)
+
+def verify_password(password: str, password_hash: str, salt: str) -> bool:
+    verify_password_hash = pbkdf2_hmac("sha256", password.encode(), salt.encode(), HASH_ITERS)
+    return verify_password_hash.hex() == password_hash
 
 
 def add_password(password: str) -> bool:
     """Add hashed password to sqlite database"""
-    salt = bcrypt.gensalt()
-    password_buffer = bytes(password, "ascii")
-    password_hash = pbkdf2_hmac("sha256", password_buffer, salt, hash_iters)
+    if len(password) is 0:
+        raise ValueError("Password cannot be empty!")
 
-    print(password_hash.hex())
+    salt = os.urandom(SALT_SIZE)
+    password_hash = pbkdf2_hmac("sha256", password.encode(), salt.hex().encode(), HASH_ITERS)
 
-    if not verify_password(password, password_hash):
+    if not verify_password(password, password_hash.hex(), salt.hex()):
         raise ValueError("Password hash is not valid!")
 
     con = sqlite3.connect(db_name)
@@ -65,7 +70,7 @@ def add_password(password: str) -> bool:
     cursor.execute("""
         INSERT INTO passwords (password_hash, salt)
         VALUES (?, ?)
-    """, (str(password_hash), str(salt)))
+    """, (password_hash.hex(), salt.hex()))
 
     con.commit()
     con.close()
